@@ -881,37 +881,51 @@ def quant_dot_kernel(
         # print(off_scale.shape)
         mask_scale = mask_j[:, None] & mask_l_div_g[None, :]
         scale = tl.load(scale_ptr + off_scale, mask=mask_scale)
+        # print(off_scale)
 
         # load shift (offset)
         # (32,), each 32bits integer store FPINT(8)*4 shifts
         shift = tl.load(offset_ptr + off_j, mask=mask_j)
+        # print(block_id_j, block_id_k, off_j)
+        print(shift)
 
         # load weight
         # note: our weight will be stored in 4bits.
+        # l 0 4 8
         off_weight_l = l + tl.arange(0, B_MID // FPINT)
         mask_weight_l = off_weight_l < (MID // FPINT)
         off_weight = off_j[:, None] * (MID // FPINT) + off_weight_l[None, :]
         mask_weight = mask_j[:, None] & mask_weight_l[None, :]
         weight = tl.load(weight_ptr + off_weight, mask=mask_weight)
-
+        # print(off_weight)
+        
+        
         # load activation as normal float
         off_l = l + tl.arange(0, B_MID)
         mask_l = off_l < MID
         off_activation = off_l[:, None] * N1 + off_k[None, :]
         mask_activation = mask_l[:, None] & mask_k[None, :]
         activation = tl.load(activation_ptr + off_activation, mask=mask_activation)
-
+        
+        print(shift[:, None].shape)
         # unpack weight and shift
         BITS = 32 // FPINT
         unpack_offs = tl.arange(0, FPINT) * BITS
         unpack_upperbound_mask = (1 << BITS) - 1
         unpacked_shift = (shift[:, None] >> unpack_offs) & unpack_upperbound_mask
+        #print(unpacked_shift.shape)
         unpacked_weight = (weight[:, :, None] >> unpack_offs) & unpack_upperbound_mask
+        #print(unpacked_weight.shape)
         # quant transform
         # [BLOCK_J, 8, 1] * ([BLOCK_J, 8, 8] - [BLOCK_J, 8, 1])
+        print(scale.shape, unpacked_weight.shape, unpacked_shift.shape)
         transformed_weight = scale[:, :, None] * (
             unpacked_weight - unpacked_shift[:, :, None]
         )
+        print(transformed_weight)
+        # print(transformed_weight)
+        
+        # print(transformed_weight.shape)
         # shape: [*, 64]
         transformed_weight = transformed_weight.reshape(
             unpacked_shift.shape[0], unpacked_shift.shape[-1] * FPINT
